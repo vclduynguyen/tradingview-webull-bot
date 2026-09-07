@@ -34,7 +34,8 @@ Message your bot directly — you don't need TradingView for these:
 
 | Command | What it does |
 |---------|--------------|
-| `/price AAPL` | Live quote: price, change, bid/ask, day high/low, volume |
+| `/price AAPL` | Live quote + candlestick chart: price, change, bid/ask, day high/low, volume |
+| `/chart TSLA D1` | Candlestick chart only; timespans: `M1 M5 M15 M30 H1 H2 H4 D1 W1 MN1` (default `M30`) |
 | `/buy AAPL 2` | Buy 2 shares (market). Respects your execution mode (confirm/auto) |
 | `/buy AAPL 2 190.50` | Buy 2 shares with a limit price of 190.50 |
 | `/sell AAPL 1` | Sell 1 share (market) |
@@ -172,7 +173,8 @@ For production, deploy behind HTTPS (Fly.io, Render, a VPS + Caddy, etc.).
 |-------|----------|-------|
 | `secret` | yes | Must equal `WEBHOOK_SECRET`. |
 | `symbol` | yes | Ticker, e.g. `AAPL`. |
-| `side` | yes | `buy` or `sell`. |
+| `side` | one of side/signal | `buy` or `sell`. |
+| `signal` | one of side/signal | MMG signal: `B2O`/`S2C`/`S2O`/`B2C` → mapped to buy/sell. |
 | `qty` | one of qty/notional | Number of shares. |
 | `notional` | one of qty/notional | Dollar amount. |
 | `order_type` | no | `market` (default) or `limit`. |

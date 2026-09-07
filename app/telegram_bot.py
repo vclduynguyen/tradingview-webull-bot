@@ -5,6 +5,7 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from .broker import broker
+from .charts import render_candlestick
 from .config import ExecutionMode, settings
 from .models import OrderType, Side, TradingViewAlert
 from .store import pending_store
@@ -16,13 +17,17 @@ CONFIRM_PREFIX = "confirm:"
 CANCEL_PREFIX = "cancel:"
 
 HELP_TEXT = (
-    "<b>Commands</b>\n"
-    "/price SYMBOL — quote &amp; day stats (e.g. <code>/price AAPL</code>)\n"
-    "/buy SYMBOL QTY [LIMIT] — buy shares (e.g. <code>/buy AAPL 2</code> or <code>/buy AAPL 2 190.5</code>)\n"
-    "/sell SYMBOL QTY [LIMIT] — sell shares\n"
+    "<b>📊 Quotes &amp; Charts</b>\n"
+    "/price SYMBOL — live quote + candlestick chart (e.g. <code>/price AAPL</code>)\n"
+    "/chart SYMBOL [timespan] — chart only; timespan: M5 M30 H1 D1 W1 (e.g. <code>/chart TSLA D1</code>)\n\n"
+    "<b>💰 Trading</b>\n"
+    "/buy SYMBOL QTY [LIMIT] — buy shares (<code>/buy AAPL 2</code> or <code>/buy AAPL 2 190.50</code>)\n"
+    "/sell SYMBOL QTY [LIMIT] — sell shares\n\n"
+    "<b>📈 Account</b>\n"
     "/positions — your open holdings\n"
     "/balance — cash &amp; buying power\n"
-    "/status — broker &amp; execution mode\n"
+    "/status — broker &amp; execution mode\n\n"
+    "<b>ℹ️ Other</b>\n"
     "/help — this message"
 )
 
@@ -45,6 +50,7 @@ class TelegramNotifier:
         self.app.add_handler(CommandHandler("status", self._on_status))
         self.app.add_handler(CommandHandler("price", self._on_price))
         self.app.add_handler(CommandHandler("quote", self._on_price))
+        self.app.add_handler(CommandHandler("chart", self._on_chart))
         self.app.add_handler(CommandHandler("buy", self._on_buy))
         self.app.add_handler(CommandHandler("sell", self._on_sell))
         self.app.add_handler(CommandHandler("positions", self._on_positions))
@@ -155,16 +161,55 @@ class TelegramNotifier:
         except (TypeError, ValueError):
             change_line = ""
 
-        await update.message.reply_text(
+        caption = (
             f"<b>{title}</b>\n"
             f"Price: <b>{num('price')}</b>  {change_line}\n"
             f"Bid/Ask: {num('bid')} / {num('ask')}\n"
             f"Day H/L: {num('high')} / {num('low')}\n"
             f"Open/PrevClose: {num('open')} / {num('pre_close')}\n"
             f"Volume: {num('volume')}\n\n"
-            f"Trade it: <code>/buy {symbol} 1</code> · <code>/sell {symbol} 1</code>",
-            parse_mode=ParseMode.HTML,
+            f"Trade it: <code>/buy {symbol} 1</code> · <code>/sell {symbol} 1</code>"
         )
+        chart = await self._chart_image(symbol)
+        if chart is not None:
+            await update.message.reply_photo(photo=chart, caption=caption, parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(caption, parse_mode=ParseMode.HTML)
+
+    async def _chart_image(self, symbol: str, timespan: str = "M30", count: int = 60):
+        """Fetch history bars and render a candlestick PNG, or None on failure."""
+        try:
+            res = broker.data.market_data.get_history_bar(
+                symbol.upper(), "US_STOCK", timespan, count=str(count)
+            )
+            if res.status_code != 200:
+                return None
+            bars = res.json()
+            if not bars:
+                return None
+            return render_candlestick(symbol.upper(), bars, f"{symbol.upper()} · {timespan}")
+        except Exception as exc:
+            logger.warning("chart failed for %s: %s", symbol, exc)
+            return None
+
+    async def _on_chart(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update):
+            return
+        if not ctx.args:
+            await update.message.reply_text("Usage: /chart SYMBOL [timespan]  e.g. /chart TSLA D1")
+            return
+        symbol = ctx.args[0].upper()
+        timespan = ctx.args[1].upper() if len(ctx.args) > 1 else "M30"
+        valid = {"M1", "M5", "M15", "M30", "H1", "H2", "H4", "D1", "W1", "MN1"}
+        if timespan not in valid:
+            await update.message.reply_text(f"Timespan must be one of: {' '.join(sorted(valid))}")
+            return
+        await update.message.reply_chat_action("upload_photo")
+        chart = await self._chart_image(symbol, timespan)
+        if chart is None:
+            await update.message.reply_text(f"⚠️ No chart data for {symbol}.")
+            return
+        await update.message.reply_photo(photo=chart, caption=f"{symbol} · {timespan}")
 
     async def _handle_trade_command(self, update: Update, ctx, side: Side) -> None:
         if not _authorized(update):

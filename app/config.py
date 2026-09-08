@@ -1,5 +1,7 @@
+import sys
 from enum import Enum
 
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,4 +39,23 @@ class Settings(BaseSettings):
     telegram_chat_id: int
 
 
-settings = Settings()
+def _load_settings() -> Settings:
+    try:
+        return Settings()
+    except ValidationError as exc:
+        missing = [".".join(str(p) for p in e["loc"]).upper() for e in exc.errors() if e["type"] == "missing"]
+        other = [e for e in exc.errors() if e["type"] != "missing"]
+        lines = ["", "=" * 60, "CONFIGURATION ERROR - the bot cannot start.", ""]
+        if missing:
+            lines.append("Missing required environment variables:")
+            lines += [f"  - {m}" for m in missing]
+            lines.append("")
+            lines.append("Set them in your .env file (local) or in Railway -> Variables (cloud).")
+        for e in other:
+            lines.append(f"Invalid {'.'.join(str(p) for p in e['loc']).upper()}: {e['msg']}")
+        lines += ["See .env.example for the full list.", "=" * 60, ""]
+        sys.stderr.write("\n".join(lines))
+        sys.exit(1)
+
+
+settings = _load_settings()

@@ -30,6 +30,18 @@ class OrderResult:
     order_id: str | None = None
 
 
+@dataclass
+class Fill:
+    status: str  # e.g. FILLED, PARTIALLY_FILLED, PENDING, CANCELLED
+    filled_qty: float
+    filled_price: float | None
+    fees: float
+
+    @property
+    def is_final(self) -> bool:
+        return self.status in {"FILLED", "CANCELLED", "REJECTED", "EXPIRED", "FAILED"}
+
+
 class Broker:
     """Wrapper around the Webull OpenAPI trading client (sandbox or live)."""
 
@@ -127,6 +139,45 @@ class Broker:
             message=f"Order submitted ({self.mode_label}).",
             order_id=order["client_order_id"],
         )
+
+    def get_fill(self, client_order_id: str) -> Fill | None:
+        """Look up an order's current fill state, or None if not found."""
+        res = self.trade.order_v2.get_order_detail(self.account_id(), client_order_id)
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        legs = data.get("orders") if isinstance(data, dict) else None
+        leg = legs[0] if legs else (data if isinstance(data, dict) else None)
+        if not leg:
+            return None
+
+        def f(key: str) -> float | None:
+            v = leg.get(key)
+            try:
+                return float(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+
+        fees = sum(float(x.get("actual_value", 0) or 0) for x in leg.get("fees") or [])
+        return Fill(
+            status=str(leg.get("status", "UNKNOWN")).upper(),
+            filled_qty=f("filled_quantity") or 0.0,
+            filled_price=f("filled_price"),
+            fees=fees,
+        )
+
+    def wait_for_fill(self, client_order_id: str, timeout: float = 15.0, interval: float = 1.0) -> Fill | None:
+        """Poll until the order reaches a final state or timeout. Blocking."""
+        import time
+
+        deadline = time.time() + timeout
+        last: Fill | None = None
+        while time.time() < deadline:
+            last = self.get_fill(client_order_id)
+            if last and last.is_final:
+                return last
+            time.sleep(interval)
+        return last
 
     # ---- market data / account queries ----
     def get_quote(self, symbol: str) -> dict:

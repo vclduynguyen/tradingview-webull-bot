@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -116,17 +117,48 @@ class TelegramNotifier:
         summary = alert.human_summary()
 
         if mode == ExecutionMode.AUTO:
-            result = broker.place_order(alert)
-            emoji = "✅" if result.ok else "⚠️"
-            await self.send(
-                f"{emoji} <b>Auto-executed</b> [{broker.mode_label}] · {source}\n"
-                f"<code>{summary}</code>\n{result.message}"
-            )
-            return {"status": "executed", "ok": result.ok, "detail": result.message}
+            text, ok = await self.execute_and_report(alert, header=f"Auto-executed · {source}")
+            await self.send(text)
+            return {"status": "executed", "ok": ok, "detail": text}
 
         pending = pending_store.add(alert)
         await self.ask_confirmation(pending.id, summary)
         return {"status": "pending_confirmation", "order_id": pending.id}
+
+    async def execute_and_report(self, alert: TradingViewAlert, header: str) -> tuple[str, bool]:
+        """Place the order, wait for the fill, and build the Telegram report
+        (including the actual fill price). Returns (html_text, ok)."""
+        summary = alert.human_summary()
+        result = await asyncio.to_thread(broker.place_order, alert)
+        if not result.ok:
+            return (f"⚠️ <b>{header}</b> [{broker.mode_label}]\n<code>{summary}</code>\n{result.message}", False)
+
+        fill = await asyncio.to_thread(broker.wait_for_fill, result.order_id) if result.order_id else None
+        verb = "Bought" if alert.side == Side.BUY else "Sold"
+        sym = alert.symbol.upper()
+
+        if fill and fill.filled_qty > 0 and fill.filled_price:
+            total = fill.filled_qty * fill.filled_price
+            partial = "" if fill.status == "FILLED" else f" ({fill.status.replace('_', ' ').title()})"
+            fee_line = f"\nFees: ${fill.fees:.2f}" if fill.fees else ""
+            text = (
+                f"✅ <b>{verb} {sym}</b>{partial} [{broker.mode_label}]\n"
+                f"<b>{fill.filled_qty:g} shares @ ${fill.filled_price:,.2f}</b>\n"
+                f"Total: ${total:,.2f}{fee_line}\n"
+                f"<i>{header}</i>"
+            )
+        elif fill and fill.is_final:
+            text = (
+                f"⚠️ <b>{sym} order {fill.status.title()}</b> [{broker.mode_label}]\n"
+                f"<code>{summary}</code>\n<i>{header}</i>"
+            )
+        else:
+            status = fill.status.title() if fill else "Submitted"
+            text = (
+                f"🕒 <b>{sym} order {status}</b> [{broker.mode_label}]\n"
+                f"<code>{summary}</code>\nNot filled yet — check /positions shortly.\n<i>{header}</i>"
+            )
+        return (text, True)
 
     # ---- handlers ----
     async def _on_start(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -276,11 +308,7 @@ class TelegramNotifier:
             await update.message.reply_text(f"⚠️ {exc}")
             return
 
-        result = await self.route_alert(alert, source="Manual")
-        if result["status"] == "executed" and not result.get("ok"):
-            return  # route_alert already messaged the failure
-        if result["status"] == "executed":
-            await update.message.reply_text("Order sent. See confirmation above.")
+        await self.route_alert(alert, source="Manual")  # reports result (incl. fill price) itself
 
     async def _on_buy(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await self._handle_trade_command(update, ctx, Side.BUY)
@@ -352,12 +380,11 @@ class TelegramNotifier:
             if pending is None:
                 await query.edit_message_text("⚠️ This signal expired or was already handled.")
                 return
-            result = broker.place_order(pending.alert)
-            emoji = "✅" if result.ok else "⚠️"
             await query.edit_message_text(
-                f"{emoji} <code>{pending.alert.human_summary()}</code>\n{result.message}",
-                parse_mode=ParseMode.HTML,
+                f"⏳ Executing <code>{pending.alert.human_summary()}</code>…", parse_mode=ParseMode.HTML
             )
+            text, _ok = await self.execute_and_report(pending.alert, header="Confirmed by you")
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
 
 notifier = TelegramNotifier()

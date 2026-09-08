@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import re
+import time
+from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -9,7 +12,7 @@ from .broker import broker
 from .charts import render_candlestick
 from .config import ExecutionMode, settings
 from .models import OrderType, Side, TradingViewAlert
-from .store import pending_store
+from .store import activity_log, pending_store
 from .strategy import plan_trade
 
 logger = logging.getLogger(__name__)
@@ -28,10 +31,17 @@ HELP_TEXT = (
     "<b>📈 Account</b>\n"
     "/positions — your open holdings\n"
     "/balance — cash &amp; buying power\n"
-    "/status — broker &amp; execution mode\n\n"
+    "/activity — recent signals &amp; what the bot did with them\n"
+    "/status — broker, uptime &amp; execution mode\n\n"
     "<b>ℹ️ Other</b>\n"
     "/help — this message"
 )
+
+
+def _plain_first_lines(html: str, n: int) -> str:
+    """Strip simple HTML tags and join the first n lines with ' · '."""
+    text = re.sub(r"</?(b|i|code)>", "", html)
+    return " · ".join(line for line in text.split("\n")[:n] if line.strip())
 
 
 def _authorized(update: Update) -> bool:
@@ -57,6 +67,7 @@ class TelegramNotifier:
         self.app.add_handler(CommandHandler("sell", self._on_sell))
         self.app.add_handler(CommandHandler("positions", self._on_positions))
         self.app.add_handler(CommandHandler("balance", self._on_balance))
+        self.app.add_handler(CommandHandler("activity", self._on_activity))
         self.app.add_handler(CallbackQueryHandler(self._on_button))
 
     # ---- lifecycle ----
@@ -99,17 +110,21 @@ class TelegramNotifier:
         """Shared execution path for both TradingView webhooks and Telegram
         commands: auto-execute or ask for confirmation based on mode."""
         mode = alert.mode or settings.execution_mode
+        activity_log.signals_received += 1
+        incoming = alert.human_summary()
 
         # Autonomous sizing: decide whether/how much to trade from holdings + risk settings.
         if alert.needs_sizing:
             try:
-                plan = plan_trade(alert)
+                plan = await asyncio.to_thread(plan_trade, alert)
             except Exception as exc:
-                await self.send(f"⚠️ <b>Strategy error</b> · {source}\n<code>{alert.human_summary()}</code>\n{exc}")
+                activity_log.add(f"⚠️ {incoming} — strategy error: {exc}")
+                await self.send(f"⚠️ <b>Strategy error</b> · {source}\n<code>{incoming}</code>\n{exc}")
                 return {"status": "error", "detail": str(exc)}
             if plan.alert is None:
-                logger.info("Skipped %s: %s", alert.human_summary(), plan.reason)
-                await self.send(f"⏭ <b>Skipped</b> · {source}\n<code>{alert.human_summary()}</code>\n{plan.reason}")
+                logger.info("Skipped %s: %s", incoming, plan.reason)
+                activity_log.add(f"⏭ {incoming} — {plan.reason}")
+                await self.send(f"⏭ <b>Skipped</b> · {source}\n<code>{incoming}</code>\n{plan.reason}")
                 return {"status": "skipped", "reason": plan.reason}
             alert = plan.alert
             logger.info("Strategy: %s -> %s", plan.reason, alert.human_summary())
@@ -118,10 +133,12 @@ class TelegramNotifier:
 
         if mode == ExecutionMode.AUTO:
             text, ok = await self.execute_and_report(alert, header=f"Auto-executed · {source}")
+            activity_log.add(_plain_first_lines(text, 2))
             await self.send(text)
             return {"status": "executed", "ok": ok, "detail": text}
 
         pending = pending_store.add(alert)
+        activity_log.add(f"❔ {summary} — awaiting your confirmation")
         await self.ask_confirmation(pending.id, summary)
         return {"status": "pending_confirmation", "order_id": pending.id}
 
@@ -178,7 +195,11 @@ class TelegramNotifier:
     async def _on_status(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update):
             return
+        up = int(time.time() - activity_log.started_at)
+        uptime = f"{up // 86400}d {up % 86400 // 3600}h {up % 3600 // 60}m" if up >= 86400 else f"{up // 3600}h {up % 3600 // 60}m"
         await update.message.reply_text(
+            f"🟢 <b>Online</b> · uptime {uptime}\n"
+            f"Signals received since start: {activity_log.signals_received}\n\n"
             f"<b>Broker:</b> {broker.mode_label}\n"
             f"<b>Execution mode:</b> {settings.execution_mode.value}\n\n"
             f"<b>Autonomous strategy</b>\n"
@@ -336,6 +357,22 @@ class TelegramNotifier:
             extra = f" · avg {cost}" if cost else ""
             extra += f" · P/L {pl}" if pl else ""
             lines.append(f"{sym}: {qty}{extra}")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    async def _on_activity(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update):
+            return
+        items = activity_log.recent(10)
+        if not items:
+            await update.message.reply_text(
+                "No signals received since the bot started.\n"
+                "When a TradingView alert fires, it will show up here along with what the bot did."
+            )
+            return
+        lines = ["<b>Recent activity</b> (UTC)"]
+        for ts, text in reversed(items):
+            when = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %d %H:%M")
+            lines.append(f"<code>{when}</code>  {text}")
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def _on_balance(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:

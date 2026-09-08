@@ -42,4 +42,22 @@ class PendingStore:
             self._items.pop(k, None)
 
 
+class ActivityLog:
+    """Rolling in-memory log of recent signals and outcomes, for /activity."""
+
+    def __init__(self, max_items: int = 30) -> None:
+        self._items: list[tuple[float, str]] = []
+        self._max = max_items
+        self.started_at = time.time()
+        self.signals_received = 0
+
+    def add(self, text: str) -> None:
+        self._items.append((time.time(), text))
+        self._items = self._items[-self._max :]
+
+    def recent(self, n: int = 10) -> list[tuple[float, str]]:
+        return self._items[-n:]
+
+
 pending_store = PendingStore()
+activity_log = ActivityLog()

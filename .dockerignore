@@ -1,0 +1,12 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+*.log.*
+conf/
+.git/
+.devin/
+.DS_Store
+README.md

@@ -59,22 +59,53 @@ The bot maps them like this:
 | `B2C` | BUY (cover short) |
 | `S2O` | SELL (open short — **needs a margin account**, not cash) |
 
-To wire it up:
-1. Add the **MMG V12.0** indicator to your chart.
-2. Create a TradingView **Alert** → Condition: the **MMG** indicator (pick its buy/sell
-   alert condition, or "Any alert() function call" if the script uses `alert()`).
-3. Set **Webhook URL** to `https://your-domain/webhook`.
-4. Set the alert **Message** to JSON using the MMG signal, e.g. a Buy-to-Open:
+## Fully autonomous mode (bot picks & sizes trades)
+
+Leave `qty`/`notional` **out** of the alert and the bot manages the trade itself:
+
+| Signal | What the bot does |
+|--------|-------------------|
+| `B2O` | If not already holding the symbol and under `MAX_POSITIONS`, buys `floor(POSITION_SIZE_USD / price)` whole shares at market. |
+| `S2C` | Sells the **entire** held position of that symbol at market. Skips if nothing held. |
+| `S2O` / `B2C` | Skipped unless `ALLOW_SHORTING=true` (needs a margin account). |
+
+Every decision — trade or skip — is reported to Telegram with the reason
+("Already holding", "Max positions reached", "No open position to close", etc.).
+
+Settings in `.env`:
+```
+EXECUTION_MODE=auto      # fire immediately, no confirm tap
+POSITION_SIZE_USD=1000   # dollars per new position
+MAX_POSITIONS=5          # cap on simultaneous holdings
+ALLOW_SHORTING=false
+```
+
+### Which stocks does it trade?
+MMG is closed-source and runs only inside TradingView, so the bot can't scan the
+market itself. Instead **you define the universe**: add an MMG alert to each stock
+you want the bot to consider (your watchlist). The bot then autonomously trades
+*whichever of those* MMG signals, within your position/size limits.
+
+### TradingView alert setup (one per stock)
+1. Add the **MMG V12.0** indicator to the chart.
+2. Create an **Alert** → Condition: the **MMG** indicator (its buy/sell alert
+   condition, or "Any alert() function call").
+3. **Expiration:** set to *Open-ended* if your plan allows, otherwise renew when it expires.
+4. **Notifications → Webhook URL:** `https://your-domain/webhook`
+5. **Message** — entry alert:
    ```json
-   {"secret":"your-webhook-secret","symbol":"{{ticker}}","signal":"B2O","qty":1,"mode":"confirm"}
+   {"secret":"your-webhook-secret","symbol":"{{ticker}}","signal":"B2O"}
    ```
-   and a separate alert for the exit (`"signal":"S2C"`).
+   and a second alert for the exit:
+   ```json
+   {"secret":"your-webhook-secret","symbol":"{{ticker}}","signal":"S2C"}
+   ```
+`{{ticker}}` auto-fills the chart symbol, so the same message works on every stock.
+Add `"qty": 5` to any alert to override auto-sizing for that alert.
 
-`{{ticker}}` is a TradingView placeholder that auto-fills the chart's symbol.
-
-> Because MMG is closed-source, its logic runs entirely inside TradingView — the bot
-> only reacts to the signals MMG fires. Since you're on a **cash** account, stick to
-> `B2O`/`S2C` (long only); `S2O` shorting requires a margin account.
+> The number of alerts you can have depends on your TradingView plan
+> (Essential ≈ 20, Plus ≈ 100, Premium ≈ 400). Since you're on a **cash** account,
+> only `B2O`/`S2C` (long only) will execute; shorting is skipped.
 
 ## Setup
 

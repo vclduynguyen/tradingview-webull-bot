@@ -55,7 +55,8 @@ class TradingViewAlert(BaseModel):
     signal: Optional[MMGSignal] = None
     order_type: OrderType = OrderType.MARKET
 
-    # Provide exactly one of qty (share count) or notional (dollar amount).
+    # Provide at most one of qty (share count) or notional (dollar amount).
+    # Omit both to let the bot auto-size the trade (autonomous mode).
     qty: Optional[float] = Field(default=None, gt=0)
     notional: Optional[float] = Field(default=None, gt=0)
 
@@ -72,16 +73,22 @@ class TradingViewAlert(BaseModel):
             self.side = Side(_MMG_TO_SIDE[self.signal])
         if self.side is None:
             raise ValueError("Provide either 'side' (buy/sell) or 'signal' (B2O/S2C/S2O/B2C).")
-        if self.qty is None and self.notional is None:
-            raise ValueError("Provide either 'qty' or 'notional'.")
         if self.qty is not None and self.notional is not None:
             raise ValueError("Provide only one of 'qty' or 'notional', not both.")
         if self.order_type == OrderType.LIMIT and self.limit_price is None:
             raise ValueError("'limit_price' is required for limit orders.")
         return self
 
+    @property
+    def needs_sizing(self) -> bool:
+        """True when neither qty nor notional was given -> bot decides size."""
+        return self.qty is None and self.notional is None
+
     def human_summary(self) -> str:
-        amount = f"{self.qty} shares" if self.qty is not None else f"${self.notional}"
+        if self.needs_sizing:
+            amount = "auto-sized"
+        else:
+            amount = f"{self.qty} shares" if self.qty is not None else f"${self.notional}"
         prefix = f"[{self.signal.value}] " if self.signal else ""
         line = f"{prefix}{self.side.value.upper()} {amount} of {self.symbol.upper()} ({self.order_type.value})"
         if self.order_type == OrderType.LIMIT:

@@ -9,6 +9,7 @@ from .charts import render_candlestick
 from .config import ExecutionMode, settings
 from .models import OrderType, Side, TradingViewAlert
 from .store import pending_store
+from .strategy import plan_trade
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,21 @@ class TelegramNotifier:
         """Shared execution path for both TradingView webhooks and Telegram
         commands: auto-execute or ask for confirmation based on mode."""
         mode = alert.mode or settings.execution_mode
+
+        # Autonomous sizing: decide whether/how much to trade from holdings + risk settings.
+        if alert.needs_sizing:
+            try:
+                plan = plan_trade(alert)
+            except Exception as exc:
+                await self.send(f"⚠️ <b>Strategy error</b> · {source}\n<code>{alert.human_summary()}</code>\n{exc}")
+                return {"status": "error", "detail": str(exc)}
+            if plan.alert is None:
+                logger.info("Skipped %s: %s", alert.human_summary(), plan.reason)
+                await self.send(f"⏭ <b>Skipped</b> · {source}\n<code>{alert.human_summary()}</code>\n{plan.reason}")
+                return {"status": "skipped", "reason": plan.reason}
+            alert = plan.alert
+            logger.info("Strategy: %s -> %s", plan.reason, alert.human_summary())
+
         summary = alert.human_summary()
 
         if mode == ExecutionMode.AUTO:
@@ -131,7 +147,13 @@ class TelegramNotifier:
         if not _authorized(update):
             return
         await update.message.reply_text(
-            f"Broker: {broker.mode_label}\nExecution mode: {settings.execution_mode.value}"
+            f"<b>Broker:</b> {broker.mode_label}\n"
+            f"<b>Execution mode:</b> {settings.execution_mode.value}\n\n"
+            f"<b>Autonomous strategy</b>\n"
+            f"Position size: ${settings.position_size_usd:,.0f} per trade\n"
+            f"Max open positions: {settings.max_positions}\n"
+            f"Shorting: {'on' if settings.allow_shorting else 'off'}",
+            parse_mode=ParseMode.HTML,
         )
 
     async def _on_price(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:

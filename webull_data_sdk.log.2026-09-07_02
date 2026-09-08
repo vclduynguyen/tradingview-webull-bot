@@ -1,0 +1,58 @@
+8671518272 2026-09-07 02:43:06,631 webull.core.http.initializer.client_initializer INFO _check_token_enable result is False
+8671518272 2026-09-07 02:56:10,183 webull.core.client ERROR ServerException occurred. Host:api.sandbox.webull.com SDK-Version:2.0.17 Request:{
+  "_version": "v2",
+  "_action_name": "/openapi/trade/stock/order/place",
+  "_protocol_type": "https",
+  "_accept_format": "JSON",
+  "_params": {},
+  "_method": "POST",
+  "_header": {
+    "x-version": "v2",
+    "category": "US_STOCK",
+    "Accept-Encoding": "gzip",
+    "x-app-key": "us.c825a1f2056fa04b3b49f3c2ef31cf2c",
+    "x-timestamp": "2026-09-07T00:56:09Z",
+    "x-signature-version": "1.0",
+    "x-signature-algorithm": "HMAC-SHA256",
+    "x-signature-nonce": "7e9343dd-cf31-585a-bc93-92b22dc3e638",
+    "x-signature": "elGsocuv6ohCu2+Svjw9VuBz3biOjQA8aSXgJYut+sA=",
+    "User-Agent": "WebullApiSDK (Darwin 25.5.0;x86_64) Python/3.9.5 Core/2.0.18 python-requests/2.32.5",
+    "x-webull-client-source": "sdk",
+    "Content-Length": "333",
+    "Content-Type": "application/json"
+  },
+  "_body_params": {
+    "account_id": "DAI0TTTUQHILE7UDQICJ9CU339",
+    "new_orders": [
+      {
+        "combo_type": "NORMAL",
+        "client_order_id": "10828df2b2c7447c83bbd0319f216a11",
+        "symbol": "ON",
+        "instrument_type": "EQUITY",
+        "market": "US",
+        "order_type": "LIMIT",
+        "side": "BUY",
+        "time_in_force": "DAY",
+        "support_trading_session": "N",
+        "entrust_type": "QTY",
+        "quantity": "1",
+        "limit_price": "70.0"
+      }
+    ]
+  },
+  "_uri_pattern": null,
+  "_uri_params": null,
+  "_content": "{\"account_id\":\"DAI0TTTUQHILE7UDQICJ9CU339\",\"new_orders\":[{\"combo_type\":\"NORMAL\",\"client_order_id\":\"10828df2b2c7447c83bbd0319f216a11\",\"symbol\":\"ON\",\"instrument_type\":\"EQUITY\",\"market\":\"US\",\"order_type\":\"LIMIT\",\"side\":\"BUY\",\"time_in_force\":\"DAY\",\"support_trading_session\":\"N\",\"entrust_type\":\"QTY\",\"quantity\":\"1\",\"limit_price\":\"70.0\"}]}",
+  "_extra_user_agent": {},
+  "string_to_sign": "",
+  "_request_connect_timeout": null,
+  "_request_read_timeout": null,
+  "endpoint": "api.sandbox.webull.com",
+  "_signer_spec": "<module 'webull.core.auth.algorithm.sha_hmac1' from '/Users/nguyenduy/projects/Skyfields-Project-main/Tradingview Bot/.venv/lib/python3.9/site-packages/webull/core/auth/algorithm/sha_hmac1.py'>"
+} Response:{'message': 'Orders cannot be placed at this time. Please try again during normal market hours 9:30 a.m. - 4:00 p.m. ET', 'error_code': 'OPENAPI_CAN_NOT_TRADING_FOR_NON_TRADING_HOURS'} ServerException:HTTP Status: 417, Code: OPENAPI_CAN_NOT_TRADING_FOR_NON_TRADING_HOURS, Msg: Orders cannot be placed at this time. Please try again during normal market hours 9:30 a.m. - 4:00 p.m. ET, RequestID: 16c0aca0-3937-491b-997d-bc9a92760303
+8671518272 2026-09-07 02:56:10,185 webull.core.client ERROR get_response exception. {
+  "error_code": "OPENAPI_CAN_NOT_TRADING_FOR_NON_TRADING_HOURS",
+  "error_msg": "Orders cannot be placed at this time. Please try again during normal market hours 9:30 a.m. - 4:00 p.m. ET",
+  "http_status": 417,
+  "request_id": "16c0aca0-3937-491b-997d-bc9a92760303"
+}

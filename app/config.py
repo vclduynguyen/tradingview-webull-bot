@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     # Execution
     execution_mode: ExecutionMode = ExecutionMode.CONFIRM
 
+    # Autonomous strategy (used when a signal arrives without qty/notional)
+    position_size_usd: float = 1000.0  # dollars to deploy per new position
+    max_positions: int = 5  # max simultaneous open positions
+    allow_shorting: bool = False  # S2O/B2C need a margin account
+
     # Webull OpenAPI
     webull_app_key: str
     webull_app_secret: str

@@ -85,6 +85,8 @@ class Broker:
         return self._account_id
 
     def _build_order(self, alert: TradingViewAlert) -> dict:
+        if alert.needs_sizing:
+            raise ValueError("Order has no qty/notional; run it through the strategy first.")
         order: dict = {
             "combo_type": "NORMAL",
             "client_order_id": uuid.uuid4().hex,  # 32 chars, unique per order
@@ -164,6 +166,40 @@ class Broker:
         if isinstance(data, dict):
             return data.get("holdings") or data.get("positions") or data.get("data") or []
         return data or []
+
+    @staticmethod
+    def position_symbol(p: dict) -> str:
+        sym = p.get("symbol") or p.get("ticker")
+        if not sym and isinstance(p.get("instrument"), dict):
+            sym = p["instrument"].get("symbol")
+        return (sym or "").upper()
+
+    @staticmethod
+    def position_qty(p: dict) -> float:
+        for key in ("quantity", "qty", "position", "shares"):
+            v = p.get(key)
+            if v not in (None, ""):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return 0.0
+
+    def held_qty(self, symbol: str) -> float:
+        """Shares currently held for `symbol` (0 if none)."""
+        symbol = symbol.upper()
+        return sum(
+            self.position_qty(p) for p in self.get_positions()
+            if self.position_symbol(p) == symbol
+        )
+
+    def current_price(self, symbol: str) -> float:
+        q = self.get_quote(symbol)
+        for key in ("price", "close", "ask", "bid"):
+            v = q.get(key)
+            if v not in (None, ""):
+                return float(v)
+        raise RuntimeError(f"No price available for {symbol}.")
 
 
 broker = Broker()
